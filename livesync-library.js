@@ -9,8 +9,9 @@ module.exports = (function () {
         baseDir
 
     const DEFAULT_PORT = 18182,
+        DELETE_FILE_OPERATION = 7,
         CREATE_FILE_OPERATION = 8,
-        DELETE_FILE_OPERATION = 7
+        DO_SYNC_OPERATION = 9
 
     function init(configurations) {
         if (!configurations.fullApplicationName) {
@@ -74,37 +75,42 @@ module.exports = (function () {
         }
     }
 
-    function getSanatizedStringLength(input, biteLength) {
-        var arr = new Array(biteLength)
-        var initialString = arr.join('0')
-        return (initialString + input.length).substr(-biteLength)
-    }
-
     function sendFile(fileName) {
-        var relativeFileName = path.relative(baseDir, fileName)
-        var fileNameLength = getSanatizedStringLength(relativeFileName, 5),
-            fileContent = fs.readFileSync(fileName),
-            fileContentLength = getSanatizedStringLength(fileContent, 10)
+        return new Promise(function (resolve, reject) {
+            var relativeFileName = path.relative(baseDir, fileName)
+            var fileNameLength = _getSanatizedStringLength(relativeFileName, 5),
+                fileContent = fs.readFileSync(fileName),
+                fileContentLength = _getSanatizedStringLength(fileContent, 10)
 
-        if (serverIsReadyToListen) {
-            console.log(`Sending file: ${fileName}`)
-            socketConnection.write(`${CREATE_FILE_OPERATION}${fileNameLength}${relativeFileName}${fileContentLength}${fileContent}`)
-        }
+            function writeDone() {
+                resolve(true)
+            }
+
+            if (serverIsReadyToListen) {
+                console.log(`Sending file: ${fileName}`)
+                socketConnection.write(`${CREATE_FILE_OPERATION}${fileNameLength}${relativeFileName}${fileContentLength}${fileContent}`, writeDone)
+            }
+        })
     }
 
     function deleteFile(fileName) {
-        var fileNameLength = getSanatizedStringLength(fileName, 5)
+        return new Promise(function (resolve, reject) {
+            var fileNameLength = _getSanatizedStringLength(fileName, 5)
 
-        if (serverIsReadyToListen) {
-            console.log(`Deleting file: ${fileName}`)
-            socketConnection.write(`${DELETE_FILE_OPERATION}${fileNameLength}${fileName}`)
-        }
+            function writeDone(a, s, d) {
+                resolve(a)
+            }
+
+            if (serverIsReadyToListen) {
+                socketConnection.write(`${DELETE_FILE_OPERATION}${fileNameLength}${fileName}`, writeDone)
+            }
+        })
     }
 
     function sendDirectory(dir) {
         return new Promise(function (resolve, reject) {
-            traverseDir(dir, function (err, list) {
-                if(err) {
+            _traverseDir(dir, function (err, list) {
+                if (err) {
                     reject(err)
                 }
                 resolve(list)
@@ -112,7 +118,50 @@ module.exports = (function () {
         })
     }
 
-    function traverseDir(dir, done) {
+    function sendFilesArray(filesArr) {
+        return new Promise(function (resolve, reject) {
+            let sendFilePromises = []
+            filesArr.forEach(file => {
+                if (!fs.existsSync(file)) {
+                    let err = new Error(`${file} doesn't exist.\nThis tool works only with absolute paths!`)
+                    return reject(err)
+                }
+                sendFilePromises.push(sendFile(file))
+            })
+            Promise.all(sendFilePromises)
+                .then(function () {
+                    sendDoSyncOperation()
+                        .then(function () {
+                            resolve(true)
+                        }, function (err) {
+                            return reject(`Failed to send do sync operation: \n${err}`)
+                        })
+                }, function (err) {
+                    return reject(`Failed to send files array: \n${err}`)
+                })
+        })
+    }
+
+    function sendDoSyncOperation() {
+        return new Promise(function (resolve, reject) {
+            function writeDone() {
+                resolve(true)
+            }
+            socketConnection.write(`${DO_SYNC_OPERATION}`, writeDone)
+        })
+    }
+
+    function end() {
+        socketConnection.end()
+    }
+
+    function _getSanatizedStringLength(input, biteLength) {
+        var arr = new Array(biteLength)
+        var initialString = arr.join('0')
+        return (initialString + input.length).substr(-biteLength)
+    }
+
+    function _traverseDir(dir, done) {
         var results = []
         fs.readdir(dir, function (err, list) {
             if (err) {
@@ -126,7 +175,7 @@ module.exports = (function () {
                 file = path.resolve(dir, file)
                 fs.stat(file, function (err, stat) {
                     if (stat && stat.isDirectory()) {
-                        traverseDir(file, function (err, res) {
+                        _traverseDir(file, function (err, res) {
                             results = results.concat(res)
                             if (!--remaining) {
                                 if (done instanceof Function) {
@@ -146,15 +195,13 @@ module.exports = (function () {
         })
     }
 
-    function end() {
-        socketConnection.end()
-    }
-
     return {
         init: init,
         sendFile: sendFile,
         deleteFile: deleteFile,
         sendDirectory: sendDirectory,
-        endLiveSync: end
+        sendFilesArray: sendFilesArray,
+        sendDoSyncOperation, sendDoSyncOperation,
+        end: end
     }
 })()
