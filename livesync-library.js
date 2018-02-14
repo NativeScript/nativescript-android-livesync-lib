@@ -37,11 +37,9 @@ module.exports = (function () {
             return new Promise(function (resolve, reject) {
                 socketConnection = socket.connect(localHostPort, localHostAddress)
 
-                // socketConnection.allowHalfOpen = true
-
                 socketConnection.on('data', function (data) {
                     serverIsReadyToListen = true
-                    resolve(socketConnection)
+                    resolve(serverIsReadyToListen)
                 })
 
                 socketConnection.on('close', function (had_error) {
@@ -55,6 +53,7 @@ module.exports = (function () {
                             configurations.errorHandler(error)
                         }
                     }
+                    reject(false)
                 })
 
                 socketConnection.on('error', function (err) {
@@ -63,6 +62,7 @@ module.exports = (function () {
                     if (configurations.errorHandler) {
                         configurations.errorHandler(error)
                     }
+                    reject(false)
                 })
             })
         }
@@ -75,9 +75,10 @@ module.exports = (function () {
         }
     }
 
-    function sendFile(fileName) {
+    function sendFile(fileName, basePath) {
         return new Promise(function (resolve, reject) {
-            var relativeFileName = path.relative(baseDir, fileName)
+            var relativeFileName = __resolveRelativeName(fileName, basePath)
+
             var fileNameLength = _getSanatizedStringLength(relativeFileName, 5),
                 fileContent = fs.readFileSync(fileName),
                 fileContentLength = _getSanatizedStringLength(fileContent, 10)
@@ -93,16 +94,17 @@ module.exports = (function () {
         })
     }
 
-    function deleteFile(fileName) {
+    function deleteFile(fileName, basePath) {
         return new Promise(function (resolve, reject) {
-            var fileNameLength = _getSanatizedStringLength(fileName, 5)
+            var relativeFileName = __resolveRelativeName(fileName, basePath)
+            var fileNameLength = _getSanatizedStringLength(relativeFileName, 5)
 
-            function writeDone(a, s, d) {
-                resolve(a)
+            function writeDone() {
+                resolve(true)
             }
 
             if (serverIsReadyToListen) {
-                socketConnection.write(`${DELETE_FILE_OPERATION}${fileNameLength}${fileName}`, writeDone)
+                socketConnection.write(`${DELETE_FILE_OPERATION}${fileNameLength}${relativeFileName}`, writeDone)
             }
         })
     }
@@ -153,6 +155,22 @@ module.exports = (function () {
 
     function end() {
         socketConnection.end()
+    }
+
+    function __resolveRelativeName(fileName, basePath) {
+        var relativeFileName
+
+        if (basePath) {
+            relativeFileName = path.relative(basePath, fileName)
+        } else {
+            if (baseDir) {
+                relativeFileName = path.relative(baseDir, fileName)
+            } else {
+                reject(new Error('You need to pass either "baseDir" when you initialize the tool or "basePath" as a second argument to this method!'))
+            }
+        }
+
+        return relativeFileName
     }
 
     function _getSanatizedStringLength(input, biteLength) {
