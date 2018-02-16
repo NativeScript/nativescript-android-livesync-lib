@@ -123,15 +123,22 @@ module.exports = (function () {
     function sendFilesArray(filesArr) {
         let sendFilePromises = []
         filesArr.forEach(file => {
-            if (!fs.existsSync(file)) {
-                let err = new Error(`${file} doesn't exist.\nThis tool works only with absolute paths!`)
-                return reject(err)
-            }
             if (!fs.lstatSync(file).isDirectory()) {
+                if (!fs.existsSync(file)) {
+                    console.log(`${file} doesn't exist.\nThis tool works only with absolute paths!`)
+                }
                 sendFilePromises.push(sendFile(file))
             }
         })
         return Promise.all(sendFilePromises)
+    }
+
+    function removeFilesArray(filesArr) {
+        let removeFilesPromises = []
+        filesArr.forEach(file => {
+            removeFilesPromises.push(deleteFile(file))
+        })
+        return Promise.all(removeFilesPromises)
     }
 
     function sendDoSyncOperation() {
@@ -156,7 +163,7 @@ module.exports = (function () {
             if (baseDir) {
                 relativeFileName = path.relative(baseDir, fileName)
             } else {
-                reject(new Error('You need to pass either "baseDir" when you initialize the tool or "basePath" as a second argument to this method!'))
+                console.log(new Error('You need to pass either "baseDir" when you initialize the tool or "basePath" as a second argument to this method!'))
             }
         }
 
@@ -209,6 +216,7 @@ module.exports = (function () {
         deleteFile: deleteFile,
         sendDirectory: sendDirectory,
         sendFilesArray: sendFilesArray,
+        removeFilesArray: removeFilesArray,
         sendDoSyncOperation, sendDoSyncOperation,
         end: end
     }
