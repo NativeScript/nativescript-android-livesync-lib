@@ -39,7 +39,7 @@ module.exports = (function () {
 
                 socketConnection.on('data', function (data) {
                     serverIsReadyToListen = true
-                    resolve(serverIsReadyToListen)
+                    return resolve(serverIsReadyToListen)
                 })
 
                 socketConnection.on('close', function (had_error) {
@@ -53,7 +53,7 @@ module.exports = (function () {
                             configurations.errorHandler(error)
                         }
                     }
-                    reject(false)
+                    return reject(false)
                 })
 
                 socketConnection.on('error', function (err) {
@@ -62,7 +62,7 @@ module.exports = (function () {
                     if (configurations.errorHandler) {
                         configurations.errorHandler(error)
                     }
-                    reject(false)
+                    return reject(false)
                 })
             })
         }
@@ -83,14 +83,16 @@ module.exports = (function () {
                 fileContent = fs.readFileSync(fileName),
                 fileContentLength = _getSanatizedStringLength(fileContent, 10)
 
-            function writeDone() {
+            function writeDone(err) {
+                //TODO: plamen5kov: meditate on this
+                // if(err) {
+                //     reject(err)
+                // }
                 resolve(true)
             }
 
-            if (serverIsReadyToListen) {
-                console.log(`Sending file: ${fileName}`)
-                socketConnection.write(`${CREATE_FILE_OPERATION}${fileNameLength}${relativeFileName}${fileContentLength}${fileContent}`, writeDone)
-            }
+            console.log(`Sending file: ${fileName}`)
+            socketConnection.write(`${CREATE_FILE_OPERATION}${fileNameLength}${relativeFileName}${fileContentLength}${fileContent}`, writeDone)
         })
     }
 
@@ -103,9 +105,7 @@ module.exports = (function () {
                 resolve(true)
             }
 
-            if (serverIsReadyToListen) {
-                socketConnection.write(`${DELETE_FILE_OPERATION}${fileNameLength}${relativeFileName}`, writeDone)
-            }
+            socketConnection.write(`${DELETE_FILE_OPERATION}${fileNameLength}${relativeFileName}`, writeDone)
         })
     }
 
@@ -121,27 +121,17 @@ module.exports = (function () {
     }
 
     function sendFilesArray(filesArr) {
-        return new Promise(function (resolve, reject) {
-            let sendFilePromises = []
-            filesArr.forEach(file => {
-                if (!fs.existsSync(file)) {
-                    let err = new Error(`${file} doesn't exist.\nThis tool works only with absolute paths!`)
-                    return reject(err)
-                }
+        let sendFilePromises = []
+        filesArr.forEach(file => {
+            if (!fs.existsSync(file)) {
+                let err = new Error(`${file} doesn't exist.\nThis tool works only with absolute paths!`)
+                return reject(err)
+            }
+            if (!fs.lstatSync(file).isDirectory()) {
                 sendFilePromises.push(sendFile(file))
-            })
-            Promise.all(sendFilePromises)
-                .then(function () {
-                    sendDoSyncOperation()
-                        .then(function () {
-                            resolve(true)
-                        }, function (err) {
-                            return reject(`Failed to send do sync operation: \n${err}`)
-                        })
-                }, function (err) {
-                    return reject(`Failed to send files array: \n${err}`)
-                })
+            }
         })
+        return Promise.all(sendFilePromises)
     }
 
     function sendDoSyncOperation() {
