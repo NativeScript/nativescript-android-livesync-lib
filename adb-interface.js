@@ -19,15 +19,15 @@ module.exports = (function () {
     function init(configurations) {
         
         let fullApplicationName = configurations.fullApplicationName,
-        deviceIdentifier = configurations.deviceIdentifier ? `-s ${configurations.deviceIdentifier}` : '',
+            deviceIdentifier = configurations.deviceIdentifier ? `-s ${configurations.deviceIdentifier}` : '',
             port = configurations.port,
-            suffix = configurations.suffix
+            suffix = configurations.suffix;
 
         return new Promise(function (resolve, reject) {
             if (!suffix) {
                 suffix = 'livesync'
             }
-            exec(`${adbExecutablePath} ${deviceIdentifier} forward tcp:${port} localabstract:${fullApplicationName}-${suffix}`, function (stderr, stdout) {
+            exec(`adb ${deviceIdentifier} forward tcp:${port} localabstract:${fullApplicationName}-${suffix}`, function (stderr, stdout) {
                 if (stderr) {
                     reject(new Error(`ADB Error:\n${stderr}`))
                 }

@@ -1,7 +1,8 @@
 let net = require('net'),
     fs = require('fs'),
     path = require('path'),
-    adbInterface = require('./adb-interface.js')
+    adbInterface = require('./adb-interface.js'),
+    crypto = require('crypto');
 
 module.exports = (function () {
     let socketConnection,
@@ -80,8 +81,12 @@ module.exports = (function () {
             var relativeFileName = __resolveRelativeName(fileName, basePath)
 
             var fileNameLength = _getSanatizedStringLength(relativeFileName, 5),
-                fileContent = fs.readFileSync(fileName),
-                fileContentLength = _getSanatizedStringLength(fileContent, 10)
+                stats = fs.statSync(fileName),
+                fileContentLength = _getSanatizedStringLength(stats.size, 10),
+                fileStream = fs.createReadStream(fileName),
+                header = `${CREATE_FILE_OPERATION}${fileNameLength}${relativeFileName}${fileContentLength}`,
+                hash = crypto.createHash('md5').update(header).digest(),
+                fileHash = crypto.createHash('md5');
 
             function writeDone(err) {
                 //TODO: plamen5kov: meditate on this
@@ -90,9 +95,14 @@ module.exports = (function () {
                 // }
                 resolve(true)
             }
-
-            console.log(`Sending file: ${fileName}`)
-            socketConnection.write(`${CREATE_FILE_OPERATION}${fileNameLength}${relativeFileName}${fileContentLength}${fileContent}`, writeDone)
+            socketConnection.write(header)
+            socketConnection.write(hash);
+            fileStream.on("data", (chunk) => {
+                fileHash.update(chunk);
+                socketConnection.write(chunk);
+            }).on("end", () => {
+                socketConnection.write(fileHash.digest(), writeDone);
+            })
         })
     }
 
@@ -100,12 +110,15 @@ module.exports = (function () {
         return new Promise(function (resolve, reject) {
             var relativeFileName = __resolveRelativeName(fileName, basePath)
             var fileNameLength = _getSanatizedStringLength(relativeFileName, 5)
+            var header = `${DELETE_FILE_OPERATION}${fileNameLength}${relativeFileName}`;
+            var hash = crypto.createHash('md5').update(header).digest()
 
             function writeDone() {
                 resolve(true)
             }
 
-            socketConnection.write(`${DELETE_FILE_OPERATION}${fileNameLength}${relativeFileName}`, writeDone)
+            socketConnection.write(header)
+            socketConnection.write(hash, writeDone)
         })
     }
 
@@ -143,10 +156,15 @@ module.exports = (function () {
 
     function sendDoSyncOperation() {
         return new Promise(function (resolve, reject) {
+            var message = `${DO_SYNC_OPERATION}`,
+                hash = crypto.createHash('md5').update(`${DO_SYNC_OPERATION}`).digest();
+
             function writeDone() {
                 resolve(true)
             }
-            socketConnection.write(`${DO_SYNC_OPERATION}`, writeDone)
+
+            socketConnection.write(message);
+            socketConnection.write(hash, writeDone);
         })
     }
 
@@ -173,7 +191,8 @@ module.exports = (function () {
     function _getSanatizedStringLength(input, biteLength) {
         var arr = new Array(biteLength)
         var initialString = arr.join('0')
-        return (initialString + input.length).substr(-biteLength)
+        size = input.length ? input.length : input;
+        return (initialString + size).substr(-biteLength)
     }
 
     function _traverseDir(dir, done) {
