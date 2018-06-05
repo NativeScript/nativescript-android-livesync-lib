@@ -10,6 +10,7 @@ module.exports = (function () {
         baseDir
 
     const DEFAULT_PORT = 18182,
+        PROTOCOL_VERSION_LENGTH_SIZE = 1,
         DELETE_FILE_OPERATION = 7,
         CREATE_FILE_OPERATION = 8,
         DO_SYNC_OPERATION = 9
@@ -39,6 +40,12 @@ module.exports = (function () {
                 socketConnection = socket.connect(localHostPort, localHostAddress)
 
                 socketConnection.on('data', function (data) {
+                    var versionLength = data.readUInt8(),
+                    versionBuffer = data.slice(PROTOCOL_VERSION_LENGTH_SIZE, versionLength + PROTOCOL_VERSION_LENGTH_SIZE),
+                    applicationIdentifierBuffer = data.slice(versionLength + PROTOCOL_VERSION_LENGTH_SIZE, data.length),
+                    version = versionBuffer.toString();
+                    applicationIdentifier = applicationIdentifierBuffer.toString();
+
                     serverIsReadyToListen = true
                     return resolve(serverIsReadyToListen)
                 })
@@ -87,22 +94,26 @@ module.exports = (function () {
                 header = `${CREATE_FILE_OPERATION}${fileNameLength}${relativeFileName}${fileContentLength}`,
                 hash = crypto.createHash('md5').update(header).digest(),
                 fileHash = crypto.createHash('md5');
-
+                console.log(`starting ${fileName}`);
             function writeDone(err) {
                 //TODO: plamen5kov: meditate on this
                 // if(err) {
                 //     reject(err)
                 // }
+                console.log(`done ${fileName}`);
                 resolve(true)
             }
             socketConnection.write(header)
             socketConnection.write(hash);
             fileStream.on("data", (chunk) => {
                 fileHash.update(chunk);
+                console.log(`writing ${fileName}`);
                 socketConnection.write(chunk);
             }).on("end", () => {
+                console.log(`hash ${fileName}`);
                 socketConnection.write(fileHash.digest(), writeDone);
             })
+            //TODO onerror
         })
     }
 
@@ -134,16 +145,21 @@ module.exports = (function () {
     }
 
     function sendFilesArray(filesArr) {
-        let sendFilePromises = []
-        filesArr.forEach(file => {
+        var reducer = function(promise, file) {
             if (!fs.lstatSync(file).isDirectory()) {
                 if (!fs.existsSync(file)) {
                     console.log(`${file} doesn't exist.\nThis tool works only with absolute paths!`)
                 }
-                sendFilePromises.push(sendFile(file))
+
+                return promise.then(function(){
+                    return sendFile.call(this, file);
+                });
             }
-        })
-        return Promise.all(sendFilePromises)
+
+            return promise;
+        }
+
+        return filesArr.reduce(reducer, Promise.resolve());
     }
 
     function removeFilesArray(filesArr) {
