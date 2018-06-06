@@ -11,13 +11,15 @@ module.exports = (function () {
 
     const DEFAULT_PORT = 18182,
         PROTOCOL_VERSION_LENGTH_SIZE = 1,
+        PROTOCOL_OPERATION_LENGTH_SIZE = 1,
+        HASH_SIZE = 16,
         DELETE_FILE_OPERATION = 7,
         CREATE_FILE_OPERATION = 8,
         DO_SYNC_OPERATION = 9
 
     function init(configurations) {
         if (!configurations.fullApplicationName) {
-            throw new Error(`You need to provide "fullApplicationName" as a configuration propery!`)
+            throw new Error(`You need to provide "fullApplicationName" as a configuration property!`)
         }
         if (!configurations.baseDir) {
             throw new Error(`You need to provide "baseDir" as a configuration property!`)
@@ -85,25 +87,43 @@ module.exports = (function () {
 
     function sendFile(fileName, basePath) {
         return new Promise(function (resolve, reject) {
-            var relativeFileName = __resolveRelativeName(fileName, basePath)
-
-            var fileNameLength = _getSanatizedStringLength(relativeFileName, 5),
+            //TODO throw error if fileContentLengthSizeSize or fileNameLengthSizeSize exceed 1 byte
+            var offset = 0,
+                fileNameData = _getFileNameData(fileName, basePath);
                 stats = fs.statSync(fileName),
-                fileContentLength = _getSanatizedStringLength(stats.size, 10),
+                fileContentLengthBytes = stats.size,
+                fileContentLengthString = fileContentLengthBytes.toString(),
+                fileContentLengthSize = Buffer.byteLength(fileContentLengthString),
+                fileContentLengthSizeSize = Buffer.byteLength(fileContentLengthSize),
                 fileStream = fs.createReadStream(fileName),
-                header = `${CREATE_FILE_OPERATION}${fileNameLength}${relativeFileName}${fileContentLength}`,
-                hash = crypto.createHash('md5').update(header).digest(),
-                fileHash = crypto.createHash('md5');
-                console.log(`starting ${fileName}`);
+                fileHash = crypto.createHash('md5'),
+                headerBuffer = new Buffer(
+                    PROTOCOL_OPERATION_LENGTH_SIZE +
+                    fileNameData.fileNameLengthSizeSize +
+                    fileNameData.fileNameLengthSize +
+                    fileNameData.fileNameLengthBytes +
+                    fileContentLengthSizeSize +
+                    fileContentLengthSize
+                );
+
+            offset += headerBuffer.write(CREATE_FILE_OPERATION.toString(), offset, PROTOCOL_OPERATION_LENGTH_SIZE);
+            offset = headerBuffer.writeInt8(fileNameData.fileNameLengthSize, offset);
+            offset += headerBuffer.write(fileNameData.fileNameLengthString, offset, fileNameData.fileNameLengthSize);
+            offset += headerBuffer.write(fileNameData.relativeFileName, offset, fileNameData.fileNameLengthBytes);
+            offset = headerBuffer.writeInt8(fileContentLengthSize, offset);
+            offset += headerBuffer.write(fileContentLengthString, offset, fileContentLengthBytes);
+            hash = crypto.createHash('md5').update(headerBuffer).digest();
+
+            console.log(`starting ${fileName}`);
             function writeDone(err) {
-                //TODO: plamen5kov: meditate on this
+                //TODO: meditate on this
                 // if(err) {
                 //     reject(err)
                 // }
                 console.log(`done ${fileName}`);
                 resolve(true)
             }
-            socketConnection.write(header)
+            socketConnection.write(headerBuffer);
             socketConnection.write(hash);
             fileStream.on("data", (chunk) => {
                 fileHash.update(chunk);
@@ -119,16 +139,26 @@ module.exports = (function () {
 
     function deleteFile(fileName, basePath) {
         return new Promise(function (resolve, reject) {
-            var relativeFileName = __resolveRelativeName(fileName, basePath)
-            var fileNameLength = _getSanatizedStringLength(relativeFileName, 5)
-            var header = `${DELETE_FILE_OPERATION}${fileNameLength}${relativeFileName}`;
-            var hash = crypto.createHash('md5').update(header).digest()
+            var offset = 0,
+                fileNameData = _getFileNameData(fileName, basePath),
+                headerBuffer = new Buffer(
+                    PROTOCOL_OPERATION_LENGTH_SIZE +
+                    fileNameData.fileNameLengthSizeSize +
+                    fileNameData.fileNameLengthSize +
+                    fileNameData.fileNameLengthBytes
+                );
+
+            offset += headerBuffer.write(DELETE_FILE_OPERATION.toString(), offset, PROTOCOL_OPERATION_LENGTH_SIZE);
+            offset = headerBuffer.writeInt8(fileNameData.fileNameLengthSize, offset);
+            offset += headerBuffer.write(fileNameData.fileNameLengthString, offset, fileNameData.fileNameLengthSize);
+            headerBuffer.write(fileNameData.relativeFileName, offset, fileNameData.fileNameLengthBytes);
+            var hash = crypto.createHash('md5').update(headerBuffer).digest()
 
             function writeDone() {
                 resolve(true)
             }
 
-            socketConnection.write(header)
+            socketConnection.write(headerBuffer)
             socketConnection.write(hash, writeDone)
         })
     }
@@ -204,11 +234,14 @@ module.exports = (function () {
         return relativeFileName
     }
 
-    function _getSanatizedStringLength(input, biteLength) {
-        var arr = new Array(biteLength)
-        var initialString = arr.join('0')
-        size = input.length ? input.length : input;
-        return (initialString + size).substr(-biteLength)
+    function _getFileNameData(filename, basePath) {
+        relativeFileName = __resolveRelativeName(filename, basePath),
+        fileNameLengthBytes = Buffer.byteLength(relativeFileName),
+        fileNameLengthString = fileNameLengthBytes.toString(),
+        fileNameLengthSize = Buffer.byteLength(fileNameLengthString),
+        fileNameLengthSizeSize = Buffer.byteLength(fileNameLengthSize);
+
+        return {relativeFileName, fileNameLengthBytes, fileNameLengthString, fileNameLengthSize, fileNameLengthSizeSize};
     }
 
     function _traverseDir(dir, done) {
