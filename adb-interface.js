@@ -1,44 +1,43 @@
-let path = require('path')
-let adbExecutablePath = path.resolve(__dirname, './adb/adb'),
-    exec = require('child_process').exec
-module.exports = (function () {
+const path = require("path"),
+    adbExecutablePath = path.resolve(__dirname, "./adb/adb"),
+    { exec } = require("child_process");
 
+module.exports = (function () {
     function list() {
         return new Promise(function (resolve, reject) {
             exec(`${adbExecutablePath} forward --list`, function (stderr, stdout) {
                 if (stderr) {
-                    reject(stderr)
+                    reject(stderr);
                 }
                 if (stdout) {
-                    resolve(stdout)
+                    resolve(stdout);
                 }
-            })
-        })
+            });
+        });
     }
 
     function init(configurations) {
-        
-        let fullApplicationName = configurations.fullApplicationName,
-            deviceIdentifier = configurations.deviceIdentifier ? `-s ${configurations.deviceIdentifier}` : '',
-            port = configurations.port,
-            suffix = configurations.suffix;
+        const { fullApplicationName, port } = configurations,
+            deviceIdentifier = configurations.deviceIdentifier ? `-s ${configurations.deviceIdentifier}` : "";
+
+        let { suffix } = configurations;
 
         return new Promise(function (resolve, reject) {
             if (!suffix) {
-                suffix = 'livesync'
+                suffix = "livesync";
             }
             exec(`adb ${deviceIdentifier} forward tcp:${port} localabstract:${fullApplicationName}-${suffix}`, function (stderr, stdout) {
                 if (stderr) {
-                    reject(new Error(`ADB Error:\n${stderr}`))
+                    reject(new Error(`ADB Error:\n${stderr}`));
                 }
 
-                resolve(true)
-            })
-        })
+                resolve(true);
+            });
+        });
     }
 
     return {
-        list: list,
-        init: init,
-    }
-})()
+        list,
+        init
+    };
+}());

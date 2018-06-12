@@ -4,15 +4,19 @@
 	"description": "JavaScript library for livesyncing changes to a NativeScript application on android.",
 	"main": "./livesync-library.js",
 	"repository": {
-	  "type": "git",
-	  "url": "git+https://github.com/nativescript/nativescript-android-livesync-lib.git"
+		"type": "git",
+		"url": "git+https://github.com/nativescript/nativescript-android-livesync-lib.git"
 	},
-	"keywords": [
-	],
+	"keywords": [],
 	"author": "Telerik <support@telerik.com>",
 	"license": "Apache-2.0",
 	"bugs": {
-	  "url": "https://github.com/nativescript/nativescript-android-livesync-lib/issues"
+		"url": "https://github.com/nativescript/nativescript-android-livesync-lib/issues"
 	},
-	"homepage": "https://github.com/nativescript/nativescript-android-livesync-lib#readme"
+	"homepage": "https://github.com/nativescript/nativescript-android-livesync-lib#readme",
+	"dependencies": {
+		"eslint": "^4.19.1",
+		"eslint-config-airbnb-base": "^12.1.0",
+		"eslint-plugin-import": "^2.12.0"
+	}
 }

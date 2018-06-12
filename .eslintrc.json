@@ -1,0 +1,76 @@
+{
+    "extends": "airbnb-base",
+    "root": true,
+    "parserOptions": {
+        "ecmaVersion": 6,
+        "sourceType": "module",
+        "ecmaFeatures": {
+            "impliedStrict": true
+        }
+    },
+    "env": {
+        "es6": true,
+        "browser": true,
+        "node": true,
+        "mocha": true
+    },
+    "globals": {
+        "chai": false,
+        "sinon": false
+    },
+    "rules": {
+        "semi": 2,
+        "camelcase": ["error", { "properties": "never" }],
+        "new-cap": ["error", {
+            "newIsCap": true,
+            "newIsCapExceptions": [],
+            "capIsNew": true
+        }],
+        "indent": ["error", 4, { "SwitchCase": 1, "VariableDeclarator": 1, "outerIIFEBody": 1 }],
+        "quotes": ["error", "double", { "allowTemplateLiterals": true }],
+        "space-in-parens": ["error", "never"],
+        "linebreak-style": "off",
+        "prefer-arrow-callback": "off",
+        "no-empty": ["error", { "allowEmptyCatch": true }],
+        "comma-dangle": "off",
+        "arrow-body-style": "off",
+        "curly": ["error", "all"],
+        "spaced-comment": "off",
+        "keyword-spacing": ["error", {"after": true}],
+        "global-require": "off",
+        "max-params": ["error", 3],
+        "max-len": ["error", 140, 4, {
+            "ignoreUrls": true,
+            "ignoreComments": false,
+            "ignoreStrings": false,
+            "ignoreTemplateLiterals": false
+        }],
+        "no-unused-vars": ["error", { "vars": "all", "args": "none" }],
+        "one-var": ["error", "consecutive"],
+        "no-underscore-dangle": "off",
+        "no-param-reassign": "off",
+        "no-bitwise": "off",
+        "arrow-parens": "off",
+        "import/no-extraneous-dependencies": "off",
+        "import/no-dynamic-require": "off",
+        "no-new": "off",
+        "class-methods-use-this": "off",
+        "func-names": "off",
+        "no-console": "off",
+        "consistent-return": "off",
+        "radix": "off",
+        "no-mixed-operators": [
+            "error", {
+                "groups": [
+                    ["+", "-", "*", "/", "%", "**"],
+                    ["&", "|", "^", "~", "<<", ">>", ">>>"],
+                    ["==", "!=", "===", "!==", ">", ">=", "<", "<="],
+                    ["&&", "||"],
+                    ["in", "instanceof"]
+                ],
+                "allowSamePrecedence": true
+            }
+        ],
+        "newline-before-return": "error"
+    }
+}

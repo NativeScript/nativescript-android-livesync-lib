@@ -10,13 +10,12 @@ In order to use this package you need:
 ## Usage
 The library has a few public methods that allow file manipulation to the files of a NativeScript application and provide control for refreshing the application. Restarting the application if necessary should be done by the user of this library.
 
-### Calling init
-Init method will establish a fresh socket connection with the application. It takes a configuration object as parameter.
-config
+### Creating instance
+The constructor of the library takes a configuration as a parameter. Later on this configuration will be used to establish a connection with the device.
 
 Example:
 ```
-livesyncTool = require("nativescript-android-livesync-lib");
+LivesyncTool = require("nativescript-android-livesync-lib");
 
 /**
  * address defaults to "127.0.0.1".
@@ -30,13 +29,22 @@ var configuration = {
 	port: 18183
 }
 
-livesyncTool.init(configuration)
+livesyncTool = new LivesyncTool(configuration);
+```
+
+
+### Calling connect
+Connect method will establish a fresh socket connection with the application.
+
+Example:
+```
+livesyncTool.connect()
 ```
 
 The method returns a promise which is resolved once the connection is established.
 
 ### Calling sendFile
-Send file will create/update the file with the file content it reads from the filePath that is provided. It will compute the relative path based on the base path provided as argument or the one provided in the `init` method.
+Send file will create/update the file with the file content it reads from the filePath that is provided. It will compute the relative path based on the base path provided as argument or the one provided in configuration that was passed to constructor.
 
 Example:
 ```
