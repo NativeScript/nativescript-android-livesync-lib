@@ -17,7 +17,7 @@ module.exports = (function () {
     }
 
     function init(configurations) {
-        const { fullApplicationName, port } = configurations,
+        const { fullApplicationName, port, adbPath } = configurations,
             deviceIdentifier = configurations.deviceIdentifier ? `-s ${configurations.deviceIdentifier}` : "";
 
         let { suffix } = configurations;
@@ -26,7 +26,7 @@ module.exports = (function () {
             if (!suffix) {
                 suffix = "livesync";
             }
-            exec(`adb ${deviceIdentifier} forward tcp:${port} localabstract:${fullApplicationName}-${suffix}`, function (stderr, stdout) {
+            exec(`${adbPath} ${deviceIdentifier} forward tcp:${port} localabstract:${fullApplicationName}-${suffix}`, function (stderr, stdout) {
                 if (stderr) {
                     reject(new Error(`ADB Error:\n${stderr}`));
                 }

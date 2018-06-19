@@ -14,6 +14,10 @@ module.exports = (function () {
 
     class LivesyncTool {
         constructor(configurations) {
+            this.initialized = false;
+        }
+
+        connect(configurations) {
             this.configurations = configurations;
             this.initialized = false;
             this.configurations.port = this.configurations.port || DEFAULT_PORT;
@@ -26,10 +30,7 @@ module.exports = (function () {
             if (!configurations.baseDir) {
                 throw new Error(`You need to provide "baseDir" as a configuration property!`);
             }
-        }
 
-        connect() {
-            //const { fullApplicationName } = this.configurations;
             const { baseDir, port, localHostAddress } = this.configurations,
                 socket = new net.Socket();
 
@@ -107,7 +108,8 @@ module.exports = (function () {
                         fileNameData.fileNameLengthBytes +
                         fileContentLengthSizeSize +
                         fileContentLengthSize);
-
+                console.log(fileName);
+                console.log(fileNameData.relativeFileName);
                 let offset = 0;
                 offset += headerBuffer.write(CREATE_FILE_OPERATION.toString(), offset, PROTOCOL_OPERATION_LENGTH_SIZE);
                 offset = headerBuffer.writeInt8(fileNameData.fileNameLengthSize, offset);
@@ -117,24 +119,26 @@ module.exports = (function () {
                 offset += headerBuffer.write(fileContentLengthString, offset, fileContentLengthBytes);
                 const hash = crypto.createHash("md5").update(headerBuffer).digest();
 
-                console.log(`starting ${fileName}`);
+                //console.log(`starting ${fileName}`);
                 function writeDone(err) {
                     //TODO: meditate on this
                     // if(err) {
                     //     reject(err)
                     // }
-                    console.log(`done ${fileName}`);
+                    //console.log(`done ${fileName}`);
                     resolve(true);
                 }
                 this.socketConnection.write(headerBuffer);
                 this.socketConnection.write(hash);
                 fileStream.on("data", (chunk) => {
                     fileHash.update(chunk);
-                    console.log(`writing ${fileName}`);
+                    //console.log(`writing ${fileName}`);
                     this.socketConnection.write(chunk);
                 }).on("end", () => {
-                    console.log(`hash ${fileName}`);
+                    //console.log(`hash ${fileName}`);
                     this.socketConnection.write(fileHash.digest(), writeDone);
+                }).on("error", (error) => {
+                    //console.log("error");
                 });
                 //TODO onerror
             }.bind(this));
@@ -184,13 +188,13 @@ module.exports = (function () {
 
                     return promise.then(function () {
                         return this.sendFile.call(this, file);
-                    });
+                    }.bind(this));
                 }
 
                 return promise;
             };
 
-            return filesArr.reduce(reducer, Promise.resolve());
+            return filesArr.reduce(reducer.bind(this), Promise.resolve());
         }
 
         removeFilesArray(filesArr) {
@@ -232,7 +236,7 @@ module.exports = (function () {
                 console.log(new Error("You need to pass either \"baseDir\" when you initialize the tool or \"basePath\" as a second argument to this method!"));
             }
 
-            return relativeFileName;
+            return relativeFileName.split(path.sep).join(path.posix.sep);
         }
 
         _getFileNameData(filename, basePath) {
