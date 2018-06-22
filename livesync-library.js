@@ -2,7 +2,8 @@ const net = require("net"),
     fs = require("fs"),
     path = require("path"),
     adbInterface = require("./adb-interface.js"),
-    crypto = require("crypto");
+    crypto = require("crypto"),
+    recursive = require("recursive-readdir");
 
 module.exports = (function () {
     const DEFAULT_PORT = 18182,
@@ -13,7 +14,7 @@ module.exports = (function () {
         DO_SYNC_OPERATION = 9;
 
     class LivesyncTool {
-        constructor(configurations) {
+        constructor() {
             this.initialized = false;
         }
 
@@ -170,12 +171,11 @@ module.exports = (function () {
 
         sendDirectory(dir) {
             return new Promise(function (resolve, reject) {
-                this._traverseDir(dir, (err, list) => {
-                    if (err) {
-                        reject(err);
-                    }
-                    resolve(list);
-                });
+                recursive(dir, function (err, list) {
+                    this.sendFiles.call(this, list).then(() => {
+                        resolve(list);
+                    });
+                }.bind(this));
             }.bind(this));
         }
 
@@ -253,42 +253,6 @@ module.exports = (function () {
                 fileNameLengthSize,
                 fileNameLengthSizeSize
             };
-        }
-
-        _traverseDir(dir, done) {
-            let results = [];
-            const that = this;
-
-            fs.readdir(dir, (err, list) => {
-                if (err) {
-                    return done(err);
-                }
-                let remaining = list.length;
-                if (!remaining) {
-                    return done(null, results);
-                }
-                list.forEach((file) => {
-                    file = path.resolve(dir, file);
-                    fs.stat(file, (statErr, stat) => {
-                        if (stat && stat.isDirectory()) {
-                            that._traverseDir(file, (traverseErr, res) => {
-                                results = results.concat(res);
-                                if (!--remaining) {
-                                    if (done instanceof Function) {
-                                        done(null, results);
-                                    }
-                                }
-                            });
-                        } else {
-                            results.push(file);
-                            that.sendFile(file);
-                            if (!--remaining) {
-                                done(null, results);
-                            }
-                        }
-                    });
-                });
-            });
         }
     }
 
