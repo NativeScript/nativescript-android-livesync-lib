@@ -16,6 +16,7 @@ module.exports = (function () {
     class LivesyncTool {
         constructor() {
             this.initialized = false;
+            this.operationPromises = [];
         }
 
         connect(configurations) {
@@ -41,7 +42,7 @@ module.exports = (function () {
                 return new Promise(function (resolve, reject) {
                     this.socketConnection = socket.connect(port, localHostAddress);
 
-                    this.socketConnection.on("data", function (data) {
+                    this.socketConnection.once("data", function (data) {
                         const versionLength = data.readUInt8(),
                             versionBuffer = data.slice(PROTOCOL_VERSION_LENGTH_SIZE, versionLength + PROTOCOL_VERSION_LENGTH_SIZE),
                             applicationIdentifierBuffer = data.slice(versionLength + PROTOCOL_VERSION_LENGTH_SIZE, data.length);
@@ -49,9 +50,10 @@ module.exports = (function () {
                         this.protocolVersion = versionBuffer.toString();
                         this.applicationIdentifier = applicationIdentifierBuffer.toString();
                         this.initialized = true;
+                        this.socketConnection.on("data", this._handleSyncEnd.bind(this));
 
                         return resolve(this.initialized);
-                    });
+                    }.bind(this));
 
                     this.socketConnection.on("close", function (hasError) {
                         let error = new Error("Server socket is closed!");
@@ -172,7 +174,7 @@ module.exports = (function () {
         sendDirectory(dir) {
             return new Promise(function (resolve, reject) {
                 recursive(dir, function (err, list) {
-                    this.sendFiles.call(this, list).then(() => {
+                    this.sendFilesArray.call(this, list).then(() => {
                         resolve(list);
                     });
                 }.bind(this));
@@ -208,21 +210,30 @@ module.exports = (function () {
         }
 
         sendDoSyncOperation() {
-            return new Promise(function (resolve, reject) {
-                const message = `${DO_SYNC_OPERATION}`,
-                    hash = crypto.createHash("md5").update(`${DO_SYNC_OPERATION}`).digest();
+            const id = crypto.randomBytes(16).toString("hex"),
+                operationPromise = new Promise(function (resolve, reject) {
+                    const message = `${DO_SYNC_OPERATION}${id}`,
+                        hash = crypto.createHash("md5").update(message).digest();
 
-                function writeDone() {
-                    resolve(true);
-                }
+                    this.socketConnection.write(message);
+                    this.socketConnection.write(hash);
 
-                this.socketConnection.write(message);
-                this.socketConnection.write(hash, writeDone);
-            }.bind(this));
+                    this.operationPromises[id] = {
+                        resolve,
+                        reject
+                    };
+                }.bind(this));
+
+            return operationPromise;
         }
 
         end() {
             this.socketConnection.end();
+        }
+
+        _handleSyncEnd(data) {
+            const operationUid = data.toString();
+            this.operationPromises[operationUid].resolve(operationUid);
         }
 
         _resolveRelativeName(fileName, basePath) {
