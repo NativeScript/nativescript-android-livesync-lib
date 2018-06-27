@@ -33,55 +33,6 @@ module.exports = (function () {
                 throw new Error(`You need to provide "baseDir" as a configuration property!`);
             }
 
-            const { baseDir, port, localHostAddress } = this.configurations,
-                socket = new net.Socket();
-
-            this.baseDir = baseDir;
-
-            function adbInitializedCallback(result) {
-                return new Promise(function (resolve, reject) {
-                    this.socketConnection = socket.connect(port, localHostAddress);
-
-                    this.socketConnection.once("data", function (data) {
-                        const versionLength = data.readUInt8(),
-                            versionBuffer = data.slice(PROTOCOL_VERSION_LENGTH_SIZE, versionLength + PROTOCOL_VERSION_LENGTH_SIZE),
-                            applicationIdentifierBuffer = data.slice(versionLength + PROTOCOL_VERSION_LENGTH_SIZE, data.length);
-
-                        this.protocolVersion = versionBuffer.toString();
-                        this.applicationIdentifier = applicationIdentifierBuffer.toString();
-                        this.initialized = true;
-                        this.socketConnection.on("data", this._handleSyncEnd.bind(this));
-
-                        return resolve(this.initialized);
-                    }.bind(this));
-
-                    this.socketConnection.on("close", function (hasError) {
-                        let error = new Error("Server socket is closed!");
-                        if (this.initialized) {
-                            console.log("Server socket closed!");
-                        }
-                        if (hasError) {
-                            error = new Error("Socket had a transmission error");
-                            if (this.configurations.errorHandler) {
-                                this.configurations.errorHandler(error);
-                            }
-                        }
-
-                        return reject(false);
-                    });
-
-                    this.socketConnection.on("error", function (err) {
-                        this.initialized = false;
-                        const error = new Error(`Socket Error:\n${err}`);
-                        if (this.configurations.errorHandler) {
-                            this.configurations.errorHandler(error);
-                        }
-
-                        return reject(false);
-                    });
-                }.bind(this));
-            }
-
             function adbNotInitializedCallback(err) {
                 return new Promise((resolve, reject) => {
                     console.log("This tool expects a connected device or emulator!");
@@ -91,7 +42,100 @@ module.exports = (function () {
 
             return adbInterface
                 .init(this.configurations)
-                .then(adbInitializedCallback.bind(this), adbNotInitializedCallback.bind(this));
+                .then(this._initializeSocket.bind(this), adbNotInitializedCallback.bind(this));
+        }
+
+        _initializeSocket(result) {
+            return this._connectEventuallyUntilTimeout(function () {
+                const { port, localHostAddress } = this.configurations,
+                    socket = new net.Socket();
+
+                socket.connect(port, localHostAddress);
+
+                return socket;
+            }.bind(this), 100000)
+                .then(this._handleConnection.bind(this));
+        }
+
+        _handleConnection({ socket, data }) {
+            return new Promise(function (resolve, reject) {
+                socket.uid = crypto.randomBytes(16).toString("hex");
+                this.socketConnection = socket;
+                this.socketConnection.uid = crypto.randomBytes(16).toString("hex");
+                const versionLength = data.readUInt8(),
+                    versionBuffer = data.slice(PROTOCOL_VERSION_LENGTH_SIZE, versionLength + PROTOCOL_VERSION_LENGTH_SIZE),
+                    applicationIdentifierBuffer = data.slice(versionLength + PROTOCOL_VERSION_LENGTH_SIZE, data.length);
+
+                this.protocolVersion = versionBuffer.toString();
+                this.applicationIdentifier = applicationIdentifierBuffer.toString();
+                this.baseDir = this.configurations.baseDir;
+                this.initialized = true;
+                this.socketConnection.on("data", this._handleSyncEnd.bind(this));
+
+                resolve(this.initialized);
+
+                this.socketConnection.on("close", this._handleSocketClose.bind(this, socket.uid));
+
+                this.socketConnection.on("close", function (hasError) {
+                    let error = new Error("Server socket is closed!");
+                    if (this.initialized) {
+                        console.log("Server socket closed!");
+                    }
+                    if (hasError) {
+                        error = new Error("Socket had a transmission error");
+                        if (this.configurations.errorHandler) {
+                            this.configurations.errorHandler(error);
+                        }
+                    }
+
+                    reject(error);
+                });
+
+                this.socketConnection.on("error", function (err) {
+                    this.initialized = false;
+                    const error = new Error(`Socket Error:\n${err}`);
+                    if (this.configurations.errorHandler) {
+                        this.configurations.errorHandler(error);
+                    }
+
+                    return reject(error);
+                }.bind(this));
+            }.bind(this));
+        }
+
+        _connectEventuallyUntilTimeout(factory, timeout) {
+            return new Promise((resolve, reject) => {
+                let lastKnownError,
+                    isResolved = false;
+
+                setTimeout(function () {
+                    if (!isResolved) {
+                        isResolved = true;
+                        reject(lastKnownError);
+                    }
+                }, timeout);
+
+                function tryConnect() {
+                    const tryConnectAfterTimeout = (error) => {
+                            if (isResolved) {
+                                return;
+                            }
+
+                            lastKnownError = error;
+                            setTimeout(tryConnect, 10000);
+                        },
+                        socket = factory();
+
+                    socket.once("data", (data) => {
+                        socket.removeListener("close", tryConnectAfterTimeout);
+                        isResolved = true;
+                        resolve({ socket, data });
+                    });
+                    socket.on("close", tryConnectAfterTimeout);
+                }
+
+                tryConnect();
+            });
         }
 
         sendFile(fileName, basePath) {
@@ -111,15 +155,15 @@ module.exports = (function () {
                         fileNameData.fileNameLengthBytes +
                         fileContentLengthSizeSize +
                         fileContentLengthSize);
-                console.log(fileName);
-                console.log(fileNameData.relativeFileName);
+                //console.log(fileName);
+                //console.log(fileNameData.relativeFileName);
                 let offset = 0;
                 offset += headerBuffer.write(CREATE_FILE_OPERATION.toString(), offset, PROTOCOL_OPERATION_LENGTH_SIZE);
                 offset = headerBuffer.writeInt8(fileNameData.fileNameLengthSize, offset);
                 offset += headerBuffer.write(fileNameData.fileNameLengthString, offset, fileNameData.fileNameLengthSize);
                 offset += headerBuffer.write(fileNameData.relativeFileName, offset, fileNameData.fileNameLengthBytes);
                 offset = headerBuffer.writeInt8(fileContentLengthSize, offset);
-                offset += headerBuffer.write(fileContentLengthString, offset, fileContentLengthBytes);
+                offset += headerBuffer.write(fileContentLengthString, offset, fileContentLengthSize);
                 const hash = crypto.createHash("md5").update(headerBuffer).digest();
 
                 //console.log(`starting ${fileName}`);
@@ -213,15 +257,17 @@ module.exports = (function () {
             const id = crypto.randomBytes(16).toString("hex"),
                 operationPromise = new Promise(function (resolve, reject) {
                     const message = `${DO_SYNC_OPERATION}${id}`,
+                        socketId = this.socketConnection.uid,
                         hash = crypto.createHash("md5").update(message).digest();
-
-                    this.socketConnection.write(message);
-                    this.socketConnection.write(hash);
 
                     this.operationPromises[id] = {
                         resolve,
-                        reject
+                        reject,
+                        socketId
                     };
+
+                    this.socketConnection.write(message);
+                    this.socketConnection.write(hash);
                 }.bind(this));
 
             return operationPromise;
@@ -232,8 +278,22 @@ module.exports = (function () {
         }
 
         _handleSyncEnd(data) {
-            const operationUid = data.toString();
-            this.operationPromises[operationUid].resolve(operationUid);
+            const operationUid = data.toString(),
+                promiseHandler = this.operationPromises[operationUid];
+
+            if (promiseHandler) {
+                promiseHandler.resolve(operationUid);
+                delete this.operationPromises[operationUid];
+            }
+        }
+
+        _handleSocketClose(hasError, socketId) {
+            this.operationPromises.forEach((id, operationPromise) => {
+                if (operationPromise.socketId === socketId) {
+                    operationPromise.reject(hasError);
+                    delete this.operationPromises[id];
+                }
+            });
         }
 
         _resolveRelativeName(fileName, basePath) {
