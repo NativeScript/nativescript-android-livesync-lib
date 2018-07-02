@@ -17,7 +17,8 @@ module.exports = (function () {
     }
 
     function init(configurations) {
-        const { fullApplicationName, port, adbPath } = configurations,
+        const { fullApplicationName, port } = configurations,
+            adbPath = configurations.adbPath || adbExecutablePath,
             deviceIdentifier = configurations.deviceIdentifier ? `-s ${configurations.deviceIdentifier}` : "";
 
         let { suffix } = configurations;
@@ -26,13 +27,16 @@ module.exports = (function () {
             if (!suffix) {
                 suffix = "livesync";
             }
-            exec(`${adbPath} ${deviceIdentifier} forward tcp:${port} localabstract:${fullApplicationName}-${suffix}`, function (stderr, stdout) {
-                if (stderr) {
-                    reject(new Error(`ADB Error:\n${stderr}`));
-                }
+            exec(
+                `${adbPath || adbExecutablePath} ${deviceIdentifier} forward tcp:${port} localabstract:${fullApplicationName}-${suffix}`,
+                function (stderr, stdout) {
+                    if (stderr) {
+                        reject(new Error(`ADB Error:\n${stderr}`));
+                    }
 
-                resolve(true);
-            });
+                    resolve(true);
+                }
+            );
         });
     }
 

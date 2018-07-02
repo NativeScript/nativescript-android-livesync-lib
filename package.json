@@ -15,9 +15,11 @@
 	},
 	"homepage": "https://github.com/nativescript/nativescript-android-livesync-lib#readme",
 	"dependencies": {
-		"eslint": "^4.19.1",
-		"eslint-config-airbnb-base": "^12.1.0",
-		"eslint-plugin-import": "^2.12.0",
 		"recursive-readdir": "2.2.2"
+	},
+	"devDependencies": {
+		"eslint": "4.19.1",
+		"eslint-config-airbnb-base": "12.1.0",
+		"eslint-plugin-import": "2.12.0"
 	}
 }

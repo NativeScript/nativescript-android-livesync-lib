@@ -16,7 +16,7 @@ module.exports = (function () {
     class LivesyncTool {
         constructor() {
             this.initialized = false;
-            this.operationPromises = [];
+            this.operationPromises = new Map();
         }
 
         connect(configurations) {
@@ -26,116 +26,20 @@ module.exports = (function () {
             this.configurations.localHostAddress = this.configurations.localHostAddress || "127.0.0.1";
 
             if (!configurations.fullApplicationName) {
-                throw new Error(`You need to provide "fullApplicationName" as a configuration property!`);
+                return Promise.reject(Error(`You need to provide "fullApplicationName" as a configuration property!`));
             }
 
             if (!configurations.baseDir) {
-                throw new Error(`You need to provide "baseDir" as a configuration property!`);
-            }
-
-            function adbNotInitializedCallback(err) {
-                return new Promise((resolve, reject) => {
-                    console.log("This tool expects a connected device or emulator!");
-                    reject(err);
-                });
+                return Promise.reject(new Error(`You need to provide "baseDir" as a configuration property!`));
             }
 
             return adbInterface
                 .init(this.configurations)
-                .then(this._initializeSocket.bind(this), adbNotInitializedCallback.bind(this));
-        }
-
-        _initializeSocket(result) {
-            return this._connectEventuallyUntilTimeout(function () {
-                const { port, localHostAddress } = this.configurations,
-                    socket = new net.Socket();
-
-                socket.connect(port, localHostAddress);
-
-                return socket;
-            }.bind(this), 100000)
-                .then(this._handleConnection.bind(this));
-        }
-
-        _handleConnection({ socket, data }) {
-            return new Promise(function (resolve, reject) {
-                socket.uid = crypto.randomBytes(16).toString("hex");
-                this.socketConnection = socket;
-                this.socketConnection.uid = crypto.randomBytes(16).toString("hex");
-                const versionLength = data.readUInt8(),
-                    versionBuffer = data.slice(PROTOCOL_VERSION_LENGTH_SIZE, versionLength + PROTOCOL_VERSION_LENGTH_SIZE),
-                    applicationIdentifierBuffer = data.slice(versionLength + PROTOCOL_VERSION_LENGTH_SIZE, data.length);
-
-                this.protocolVersion = versionBuffer.toString();
-                this.applicationIdentifier = applicationIdentifierBuffer.toString();
-                this.baseDir = this.configurations.baseDir;
-                this.initialized = true;
-                this.socketConnection.on("data", this._handleSyncEnd.bind(this));
-
-                resolve(this.initialized);
-
-                this.socketConnection.on("close", this._handleSocketClose.bind(this, socket.uid));
-
-                this.socketConnection.on("close", function (hasError) {
-                    let error = new Error("Server socket is closed!");
-                    if (this.initialized) {
-                        console.log("Server socket closed!");
-                    }
-                    if (hasError) {
-                        error = new Error("Socket had a transmission error");
-                        if (this.configurations.errorHandler) {
-                            this.configurations.errorHandler(error);
-                        }
-                    }
-
-                    reject(error);
+                .then(this._connectEventuallyUntilTimeout.bind(this, this._createSocket.bind(this), 30000))
+                .then(this._handleConnection.bind(this), (err) => {
+                    console.log("This tool expects a connected device or emulator!");
+                    throw err;
                 });
-
-                this.socketConnection.on("error", function (err) {
-                    this.initialized = false;
-                    const error = new Error(`Socket Error:\n${err}`);
-                    if (this.configurations.errorHandler) {
-                        this.configurations.errorHandler(error);
-                    }
-
-                    return reject(error);
-                }.bind(this));
-            }.bind(this));
-        }
-
-        _connectEventuallyUntilTimeout(factory, timeout) {
-            return new Promise((resolve, reject) => {
-                let lastKnownError,
-                    isResolved = false;
-
-                setTimeout(function () {
-                    if (!isResolved) {
-                        isResolved = true;
-                        reject(lastKnownError);
-                    }
-                }, timeout);
-
-                function tryConnect() {
-                    const tryConnectAfterTimeout = (error) => {
-                            if (isResolved) {
-                                return;
-                            }
-
-                            lastKnownError = error;
-                            setTimeout(tryConnect, 10000);
-                        },
-                        socket = factory();
-
-                    socket.once("data", (data) => {
-                        socket.removeListener("close", tryConnectAfterTimeout);
-                        isResolved = true;
-                        resolve({ socket, data });
-                    });
-                    socket.on("close", tryConnectAfterTimeout);
-                }
-
-                tryConnect();
-            });
         }
 
         sendFile(fileName, basePath) {
@@ -155,37 +59,27 @@ module.exports = (function () {
                         fileNameData.fileNameLengthBytes +
                         fileContentLengthSizeSize +
                         fileContentLengthSize);
-                //console.log(fileName);
-                //console.log(fileNameData.relativeFileName);
+
                 let offset = 0;
                 offset += headerBuffer.write(CREATE_FILE_OPERATION.toString(), offset, PROTOCOL_OPERATION_LENGTH_SIZE);
                 offset = headerBuffer.writeInt8(fileNameData.fileNameLengthSize, offset);
                 offset += headerBuffer.write(fileNameData.fileNameLengthString, offset, fileNameData.fileNameLengthSize);
                 offset += headerBuffer.write(fileNameData.relativeFileName, offset, fileNameData.fileNameLengthBytes);
                 offset = headerBuffer.writeInt8(fileContentLengthSize, offset);
-                offset += headerBuffer.write(fileContentLengthString, offset, fileContentLengthSize);
+                headerBuffer.write(fileContentLengthString, offset, fileContentLengthSize);
                 const hash = crypto.createHash("md5").update(headerBuffer).digest();
 
-                //console.log(`starting ${fileName}`);
-                function writeDone(err) {
-                    //TODO: meditate on this
-                    // if(err) {
-                    //     reject(err)
-                    // }
-                    //console.log(`done ${fileName}`);
-                    resolve(true);
-                }
                 this.socketConnection.write(headerBuffer);
                 this.socketConnection.write(hash);
                 fileStream.on("data", (chunk) => {
                     fileHash.update(chunk);
-                    //console.log(`writing ${fileName}`);
                     this.socketConnection.write(chunk);
                 }).on("end", () => {
-                    //console.log(`hash ${fileName}`);
-                    this.socketConnection.write(fileHash.digest(), writeDone);
+                    this.socketConnection.write(fileHash.digest(), () => {
+                        resolve(true);
+                    });
                 }).on("error", (error) => {
-                    //console.log("error");
+                    reject(error);
                 });
                 //TODO onerror
             }.bind(this));
@@ -206,12 +100,10 @@ module.exports = (function () {
                 headerBuffer.write(fileNameData.relativeFileName, offset, fileNameData.fileNameLengthBytes);
                 const hash = crypto.createHash("md5").update(headerBuffer).digest();
 
-                function writeDone() {
-                    resolve(true);
-                }
-
                 this.socketConnection.write(headerBuffer);
-                this.socketConnection.write(hash, writeDone);
+                this.socketConnection.write(hash, () => {
+                    resolve(true);
+                });
             }.bind(this));
         }
 
@@ -260,11 +152,11 @@ module.exports = (function () {
                         socketId = this.socketConnection.uid,
                         hash = crypto.createHash("md5").update(message).digest();
 
-                    this.operationPromises[id] = {
+                    this.operationPromises.set(id, {
                         resolve,
                         reject,
                         socketId
-                    };
+                    });
 
                     this.socketConnection.write(message);
                     this.socketConnection.write(hash);
@@ -275,23 +167,106 @@ module.exports = (function () {
 
         end() {
             this.socketConnection.end();
+            this.socketConnection.destroy();
+        }
+
+        _createSocket() {
+            const { port, localHostAddress } = this.configurations,
+                socket = new net.Socket();
+
+            socket.connect(port, localHostAddress);
+
+            return socket;
+        }
+
+        _handleConnection({ socket, data }) {
+            return new Promise(function (resolve, reject) {
+                socket.uid = crypto.randomBytes(16).toString("hex");
+                this.socketConnection = socket;
+                this.socketConnection.uid = crypto.randomBytes(16).toString("hex");
+                const versionLength = data.readUInt8(),
+                    versionBuffer = data.slice(PROTOCOL_VERSION_LENGTH_SIZE, versionLength + PROTOCOL_VERSION_LENGTH_SIZE),
+                    applicationIdentifierBuffer = data.slice(versionLength + PROTOCOL_VERSION_LENGTH_SIZE, data.length);
+
+                this.protocolVersion = versionBuffer.toString();
+                this.applicationIdentifier = applicationIdentifierBuffer.toString();
+                this.baseDir = this.configurations.baseDir;
+                this.initialized = true;
+                this.socketConnection.on("data", this._handleSyncEnd.bind(this));
+
+                resolve(this.initialized);
+
+                this.socketConnection.on("close", this._handleSocketClose.bind(this, socket.uid));
+
+                this.socketConnection.on("error", function (err) {
+                    this.initialized = false;
+                    const error = new Error(`Socket Error:\n${err}`);
+                    if (this.configurations.errorHandler) {
+                        this.configurations.errorHandler(error);
+                    }
+
+                    return reject(error);
+                }.bind(this));
+            }.bind(this));
+        }
+
+        _connectEventuallyUntilTimeout(factory, timeout) {
+            return new Promise((resolve, reject) => {
+                let lastKnownError,
+                    isResolved = false;
+
+                setTimeout(() => {
+                    if (!isResolved) {
+                        isResolved = true;
+                        reject(lastKnownError);
+                    }
+                }, timeout);
+
+                function tryConnect() {
+                    const tryConnectAfterTimeout = (error) => {
+                            if (isResolved) {
+                                return;
+                            }
+
+                            if (typeof (error) === "boolean") {
+                                error = new Error("Socket closed due to error");
+                            }
+
+                            lastKnownError = error;
+                            setTimeout(tryConnect, 10000);
+                        },
+                        socket = factory();
+
+                    socket.once("data", (data) => {
+                        socket.removeListener("close", tryConnectAfterTimeout);
+                        socket.removeListener("error", tryConnectAfterTimeout);
+                        isResolved = true;
+                        resolve({ socket, data });
+                    });
+                    socket.on("close", tryConnectAfterTimeout);
+                    socket.on("error", tryConnectAfterTimeout);
+                }
+
+                tryConnect();
+            });
         }
 
         _handleSyncEnd(data) {
             const operationUid = data.toString(),
-                promiseHandler = this.operationPromises[operationUid];
+                promiseHandler = this.operationPromises.get(operationUid);
 
             if (promiseHandler) {
                 promiseHandler.resolve(operationUid);
-                delete this.operationPromises[operationUid];
+                this.operationPromises.delete(operationUid);
             }
         }
 
-        _handleSocketClose(hasError, socketId) {
-            this.operationPromises.forEach((id, operationPromise) => {
+        _handleSocketClose(socketId, hasError) {
+            this.operationPromises.forEach((operationPromise, id, operationPromises) => {
                 if (operationPromise.socketId === socketId) {
-                    operationPromise.reject(hasError);
-                    delete this.operationPromises[id];
+                    const error = new Error("Socket closed from server before operation end.");
+                    operationPromise.reject(error);
+                    operationPromises.delete(id);
                 }
             });
         }
@@ -304,7 +279,8 @@ module.exports = (function () {
             } else if (this.baseDir) {
                 relativeFileName = path.relative(this.baseDir, fileName);
             } else {
-                console.log(new Error("You need to pass either \"baseDir\" when you initialize the tool or \"basePath\" as a second argument to this method!"));
+                console.log(new Error("You need to pass either \"baseDir\" " +
+                 "when you initialize the tool or \"basePath\" as a second argument to this method!"));
             }
 
             return relativeFileName.split(path.sep).join(path.posix.sep);

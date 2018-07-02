@@ -1,9 +1,9 @@
 # nativescript-android-livesync-lib
-JavaScript library for livesyncing changes to a NativeScript application on android.
+JavaScript library for livesyncing changes to a NativeScript application on Android.
 
 ## System requirements
 In order to use this package you need:
- - NativeScript Anrdroid Runtime 4.2.0 or later
+ - NativeScript Android Runtime 4.2.0 or later
  - Node.js 4.0.0 or later
  - npm 2.0.0 or later added to your PATH environment variable (you should be able to execute `npm --version` from your default terminal).
 
@@ -11,11 +11,21 @@ In order to use this package you need:
 The library has a few public methods that allow file manipulation to the files of a NativeScript application and provide control for refreshing the application. Restarting the application if necessary should be done by the user of this library.
 
 ### Creating instance
-The constructor of the library takes a configuration as a parameter. Later on this configuration will be used to establish a connection with the device.
+Calling the constructor of the LivesyncClass.
 
 Example:
 ```
 LivesyncTool = require("nativescript-android-livesync-lib");
+
+livesyncTool = new LivesyncTool();
+```
+
+
+### Calling connect
+Connect method will establish a fresh socket connection with the application. The method takes a configuration as a parameter.
+
+Example:
+```
 
 /**
  * address defaults to "127.0.0.1".
@@ -29,16 +39,7 @@ var configuration = {
 	port: 18183
 }
 
-livesyncTool = new LivesyncTool(configuration);
-```
-
-
-### Calling connect
-Connect method will establish a fresh socket connection with the application.
-
-Example:
-```
-livesyncTool.connect()
+livesyncTool.connect(configuration)
 ```
 
 The method returns a promise which is resolved once the connection is established.
@@ -64,8 +65,8 @@ livesyncTool.sendFile("/c/myprojects/myapp/app/index.js");
 
 ## Protocol:
 
-|Operation Name | Operation | File Name Length Size | File Name Length | File Name |  File Content Length Size | Header Hash | File Content Length | File Content | File hash |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| runSync: | 9 | | | | | | md5 hash | | |
-| create: | 8 | 1 | 7 | ./a.txt | 1 | 11 | md5 hash | fileContent | md5 hash |
-| delete: | 7 | 1 | 3 | ./a | | | md5 hash | | |
+|Operation Name | Operation | Operation id | File Name Length Size | File Name Length | File Name |  File Content Length Size | File Content Length | Header Hash | File Content | File hash |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| runSync: | 9 | 32bit | | | | | | md5 hash | | |
+| create: | 8 | | 1 | 7 | ./a.txt | 1 | 11 | md5 hash | fileContent | md5 hash |
+| delete: | 7 | | 1 | 3 | ./a | | | md5 hash | | |
