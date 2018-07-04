@@ -11,12 +11,15 @@ module.exports = (function () {
         PROTOCOL_OPERATION_LENGTH_SIZE = 1,
         DELETE_FILE_OPERATION = 7,
         CREATE_FILE_OPERATION = 8,
-        DO_SYNC_OPERATION = 9;
+        DO_SYNC_OPERATION = 9,
+        ERROR_REPORT = 1,
+        OPERATION_END_REPORT = 2;
 
     class LivesyncTool {
         constructor() {
             this.initialized = false;
             this.operationPromises = new Map();
+            this.socketError = null;
         }
 
         connect(configurations) {
@@ -24,6 +27,7 @@ module.exports = (function () {
             this.initialized = false;
             this.configurations.port = this.configurations.port || DEFAULT_PORT;
             this.configurations.localHostAddress = this.configurations.localHostAddress || "127.0.0.1";
+            this.socketError = null;
 
             if (!configurations.fullApplicationName) {
                 return Promise.reject(Error(`You need to provide "fullApplicationName" as a configuration property!`));
@@ -43,22 +47,36 @@ module.exports = (function () {
         }
 
         sendFile(fileName, basePath) {
+            return this._sendFileHeader()
+                .then(this._sendFileContent.bind(this, fileName));
+        }
+
+        _sendFileHeader(fileName, basePath) {
             return new Promise(function (resolve, reject) {
-                //TODO throw error if fileContentLengthSizeSize or fileNameLengthSizeSize exceed 1 byte
+                let error;
+                this._verifyActiveConnection(reject);
                 const fileNameData = this._getFileNameData(fileName, basePath),
-                    stats = fs.statSync(fileName),
+                    stats = fs.statSync(fileNameData.fileName),
                     fileContentLengthBytes = stats.size,
                     fileContentLengthString = fileContentLengthBytes.toString(),
                     fileContentLengthSize = Buffer.byteLength(fileContentLengthString),
                     fileContentLengthSizeSize = Buffer.byteLength(fileContentLengthSize),
-                    fileStream = fs.createReadStream(fileName),
-                    fileHash = crypto.createHash("md5"),
                     headerBuffer = Buffer.alloc(PROTOCOL_OPERATION_LENGTH_SIZE +
                         fileNameData.fileNameLengthSizeSize +
                         fileNameData.fileNameLengthSize +
                         fileNameData.fileNameLengthBytes +
                         fileContentLengthSizeSize +
                         fileContentLengthSize);
+
+                if (fileNameData.fileNameLengthSizeSize > 255) {
+                    error = this._getErrorWithMessage("File name size is longer that 255 digits.");
+                } else if (fileContentLengthSizeSize > 255) {
+                    error = this._getErrorWithMessage("File name size is longer that 255 digits.");
+                }
+
+                if (error) {
+                    reject(error);
+                }
 
                 let offset = 0;
                 offset += headerBuffer.write(CREATE_FILE_OPERATION.toString(), offset, PROTOCOL_OPERATION_LENGTH_SIZE);
@@ -71,22 +89,42 @@ module.exports = (function () {
 
                 this.socketConnection.write(headerBuffer);
                 this.socketConnection.write(hash);
-                fileStream.on("data", (chunk) => {
+                resolve();
+            }.bind(this));
+        }
+
+        _sendFileContent(fileName) {
+            return new Promise(function (resolve, reject) {
+                this._verifyActiveConnection(reject);
+                const fileStream = fs.createReadStream(fileName),
+                    fileHash = crypto.createHash("md5");
+
+                fileStream.on("data", function (chunk) {
                     fileHash.update(chunk);
-                    this.socketConnection.write(chunk);
-                }).on("end", () => {
-                    this.socketConnection.write(fileHash.digest(), () => {
-                        resolve(true);
-                    });
-                }).on("error", (error) => {
+                    if (this.socketConnection) {
+                        this.socketConnection.write(chunk);
+                    } else {
+                        const error = this._checkConnectionStatus();
+                        reject(error);
+                    }
+                }.bind(this)).on("end", function () {
+                    if (this.socketConnection) {
+                        this.socketConnection.write(fileHash.digest(), () => {
+                            resolve(true);
+                        });
+                    } else {
+                        const error = this._checkConnectionStatus();
+                        reject(error);
+                    }
+                }.bind(this)).on("error", (error) => {
                     reject(error);
                 });
-                //TODO onerror
             }.bind(this));
         }
 
         deleteFile(fileName, basePath) {
             return new Promise(function (resolve, reject) {
+                this._verifyActiveConnection(reject);
                 const fileNameData = this._getFileNameData(fileName, basePath),
                     headerBuffer = Buffer.alloc(PROTOCOL_OPERATION_LENGTH_SIZE +
                         fileNameData.fileNameLengthSizeSize +
@@ -112,6 +150,8 @@ module.exports = (function () {
                 recursive(dir, function (err, list) {
                     this.sendFilesArray.call(this, list).then(() => {
                         resolve(list);
+                    }, (error) => {
+                        reject(error);
                     });
                 }.bind(this));
             }.bind(this));
@@ -145,9 +185,14 @@ module.exports = (function () {
             return Promise.all(removeFilesPromises);
         }
 
-        sendDoSyncOperation() {
-            const id = crypto.randomBytes(16).toString("hex"),
+        sendDoSyncOperation(operationId, timeout) {
+            const id = operationId || this.generateOperationUid(),
                 operationPromise = new Promise(function (resolve, reject) {
+                    this._verifyActiveConnection(reject);
+                    if (this.socketConnection === null && this.socketError) {
+                        reject(this.socketError);
+                    }
+
                     const message = `${DO_SYNC_OPERATION}${id}`,
                         socketId = this.socketConnection.uid,
                         hash = crypto.createHash("md5").update(message).digest();
@@ -160,6 +205,12 @@ module.exports = (function () {
 
                     this.socketConnection.write(message);
                     this.socketConnection.write(hash);
+
+                    setTimeout(function () {
+                        if (this.isOperationInProgress(id)) {
+                            this._handleSocketError(socketId, "Sync operation is taking too long");
+                        }
+                    }.bind(this), 6000);
                 }.bind(this));
 
             return operationPromise;
@@ -167,7 +218,14 @@ module.exports = (function () {
 
         end() {
             this.socketConnection.end();
-            this.socketConnection.destroy();
+        }
+
+        isOperationInProgress(operationId) {
+            return !!this.operationPromises.get(operationId);
+        }
+
+        generateOperationUid() {
+            return crypto.randomBytes(16).toString("hex");
         }
 
         _createSocket() {
@@ -177,6 +235,22 @@ module.exports = (function () {
             socket.connect(port, localHostAddress);
 
             return socket;
+        }
+
+        _checkConnectionStatus() {
+            if (this.socketConnection === null) {
+                const defaultError = this._getErrorWithMessage("No socket connection available."),
+                    error = this.socketError || defaultError;
+
+                return error;
+            }
+        }
+
+        _verifyActiveConnection(rejectHandler) {
+            const error = this._checkConnectionStatus();
+            if (error) {
+                rejectHandler(error);
+            }
         }
 
         _handleConnection({ socket, data }) {
@@ -192,9 +266,7 @@ module.exports = (function () {
                 this.applicationIdentifier = applicationIdentifierBuffer.toString();
                 this.baseDir = this.configurations.baseDir;
                 this.initialized = true;
-                this.socketConnection.on("data", this._handleSyncEnd.bind(this));
-
-                resolve(this.initialized);
+                this.socketConnection.on("data", this._handleData.bind(this, socket.uid));
 
                 this.socketConnection.on("close", this._handleSocketClose.bind(this, socket.uid));
 
@@ -207,6 +279,8 @@ module.exports = (function () {
 
                     return reject(error);
                 }.bind(this));
+
+                resolve(this.initialized);
             }.bind(this));
         }
 
@@ -251,6 +325,18 @@ module.exports = (function () {
             });
         }
 
+        _handleData(socketId, data) {
+            const reportType = data.readUInt8(),
+                infoBuffer = data.slice(Buffer.byteLength(reportType), data.length);
+
+            if (reportType === ERROR_REPORT) {
+                const errorMessage = infoBuffer.toString();
+                this._handleSocketError(socketId, errorMessage);
+            } else if (reportType === OPERATION_END_REPORT) {
+                this._handleSyncEnd(infoBuffer);
+            }
+        }
+
         _handleSyncEnd(data) {
             const operationUid = data.toString(),
                 promiseHandler = this.operationPromises.get(operationUid);
@@ -262,13 +348,36 @@ module.exports = (function () {
         }
 
         _handleSocketClose(socketId, hasError) {
+            const errorMessage = "Socket closed from server before operation end.";
+
+            this._handleSocketError(socketId, errorMessage);
+        }
+
+        _handleSocketError(socketId, errorMessage) {
+            const error = this._getErrorWithMessage(errorMessage);
+            if (this.socketConnection && this.socketConnection.uid === socketId) {
+                this.end();
+                this.socketConnection = null;
+                this.socketError = error;
+            }
+
             this.operationPromises.forEach((operationPromise, id, operationPromises) => {
                 if (operationPromise.socketId === socketId) {
-                    const error = new Error("Socket closed from server before operation end.");
                     operationPromise.reject(error);
                     operationPromises.delete(id);
                 }
             });
+        }
+
+        _getErrorWithMessage(errorMessage) {
+            const error = new Error(errorMessage);
+            error.message = errorMessage;
+
+            return error;
+        }
+
+        _failSocketOperationsWithError(socketId, error) {
+
         }
 
         _resolveRelativeName(fileName, basePath) {
@@ -298,7 +407,8 @@ module.exports = (function () {
                 fileNameLengthBytes,
                 fileNameLengthString,
                 fileNameLengthSize,
-                fileNameLengthSizeSize
+                fileNameLengthSizeSize,
+                filename
             };
         }
     }
