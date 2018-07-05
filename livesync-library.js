@@ -9,6 +9,7 @@ module.exports = (function () {
     const DEFAULT_PORT = 18182,
         PROTOCOL_VERSION_LENGTH_SIZE = 1,
         PROTOCOL_OPERATION_LENGTH_SIZE = 1,
+        SIZE_BYTE_LENGTH = 1,
         DELETE_FILE_OPERATION = 7,
         CREATE_FILE_OPERATION = 8,
         DO_SYNC_OPERATION = 9,
@@ -47,7 +48,7 @@ module.exports = (function () {
         }
 
         sendFile(fileName, basePath) {
-            return this._sendFileHeader()
+            return this._sendFileHeader(fileName, basePath)
                 .then(this._sendFileContent.bind(this, fileName));
         }
 
@@ -60,17 +61,16 @@ module.exports = (function () {
                     fileContentLengthBytes = stats.size,
                     fileContentLengthString = fileContentLengthBytes.toString(),
                     fileContentLengthSize = Buffer.byteLength(fileContentLengthString),
-                    fileContentLengthSizeSize = Buffer.byteLength(fileContentLengthSize),
                     headerBuffer = Buffer.alloc(PROTOCOL_OPERATION_LENGTH_SIZE +
-                        fileNameData.fileNameLengthSizeSize +
+                        SIZE_BYTE_LENGTH +
                         fileNameData.fileNameLengthSize +
                         fileNameData.fileNameLengthBytes +
-                        fileContentLengthSizeSize +
+                        SIZE_BYTE_LENGTH +
                         fileContentLengthSize);
 
-                if (fileNameData.fileNameLengthSizeSize > 255) {
+                if (fileNameData.fileNameLengthSize > 255) {
                     error = this._getErrorWithMessage("File name size is longer that 255 digits.");
-                } else if (fileContentLengthSizeSize > 255) {
+                } else if (fileContentLengthSize > 255) {
                     error = this._getErrorWithMessage("File name size is longer that 255 digits.");
                 }
 
@@ -80,10 +80,10 @@ module.exports = (function () {
 
                 let offset = 0;
                 offset += headerBuffer.write(CREATE_FILE_OPERATION.toString(), offset, PROTOCOL_OPERATION_LENGTH_SIZE);
-                offset = headerBuffer.writeInt8(fileNameData.fileNameLengthSize, offset);
+                offset = headerBuffer.writeUInt8(fileNameData.fileNameLengthSize, offset);
                 offset += headerBuffer.write(fileNameData.fileNameLengthString, offset, fileNameData.fileNameLengthSize);
                 offset += headerBuffer.write(fileNameData.relativeFileName, offset, fileNameData.fileNameLengthBytes);
-                offset = headerBuffer.writeInt8(fileContentLengthSize, offset);
+                offset = headerBuffer.writeUInt8(fileContentLengthSize, offset);
                 headerBuffer.write(fileContentLengthString, offset, fileContentLengthSize);
                 const hash = crypto.createHash("md5").update(headerBuffer).digest();
 
@@ -395,20 +395,18 @@ module.exports = (function () {
             return relativeFileName.split(path.sep).join(path.posix.sep);
         }
 
-        _getFileNameData(filename, basePath) {
-            const relativeFileName = this._resolveRelativeName(filename, basePath),
+        _getFileNameData(fileName, basePath) {
+            const relativeFileName = this._resolveRelativeName(fileName, basePath),
                 fileNameLengthBytes = Buffer.byteLength(relativeFileName),
                 fileNameLengthString = fileNameLengthBytes.toString(),
-                fileNameLengthSize = Buffer.byteLength(fileNameLengthString),
-                fileNameLengthSizeSize = Buffer.byteLength(fileNameLengthSize);
+                fileNameLengthSize = Buffer.byteLength(fileNameLengthString);
 
             return {
                 relativeFileName,
                 fileNameLengthBytes,
                 fileNameLengthString,
                 fileNameLengthSize,
-                fileNameLengthSizeSize,
-                filename
+                fileName
             };
         }
     }
