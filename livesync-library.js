@@ -21,6 +21,7 @@ module.exports = (function () {
             this.initialized = false;
             this.operationPromises = new Map();
             this.socketError = null;
+            this.socketConnection = null;
         }
 
         connect(configurations) {
@@ -105,6 +106,8 @@ module.exports = (function () {
                         this.socketConnection.write(chunk);
                     } else {
                         const error = this._checkConnectionStatus();
+                        //TODO check if properly destroys stream
+                        //fileStream.destroy();
                         reject(error);
                     }
                 }.bind(this)).on("end", function () {
@@ -189,9 +192,6 @@ module.exports = (function () {
             const id = operationId || this.generateOperationUid(),
                 operationPromise = new Promise(function (resolve, reject) {
                     this._verifyActiveConnection(reject);
-                    if (this.socketConnection === null && this.socketError) {
-                        reject(this.socketError);
-                    }
 
                     const message = `${DO_SYNC_OPERATION}${id}`,
                         socketId = this.socketConnection.uid,
@@ -210,14 +210,16 @@ module.exports = (function () {
                         if (this.isOperationInProgress(id)) {
                             this._handleSocketError(socketId, "Sync operation is taking too long");
                         }
-                    }.bind(this), 6000);
+                    }.bind(this), 60000);
                 }.bind(this));
 
             return operationPromise;
         }
 
         end() {
-            this.socketConnection.end();
+            if (this.socketConnection) {
+                this.socketConnection.end();
+            }
         }
 
         isOperationInProgress(operationId) {
