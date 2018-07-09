@@ -1,21 +1,22 @@
-const net = require("net"),
-    fs = require("fs"),
-    path = require("path"),
-    adbInterface = require("./adb-interface.js"),
-    crypto = require("crypto"),
-    recursive = require("recursive-readdir");
+const net = require("net");
+const fs = require("fs");
+const path = require("path");
+const adbInterface = require("./adb-interface.js");
+const crypto = require("crypto");
+const recursive = require("recursive-readdir");
 
 module.exports = (function () {
-    const DEFAULT_PORT = 18182,
-        PROTOCOL_VERSION_LENGTH_SIZE = 1,
-        PROTOCOL_OPERATION_LENGTH_SIZE = 1,
-        SIZE_BYTE_LENGTH = 1,
-        DELETE_FILE_OPERATION = 7,
-        CREATE_FILE_OPERATION = 8,
-        DO_SYNC_OPERATION = 9,
-        ERROR_REPORT = 1,
-        OPERATION_END_REPORT = 2,
-        REPORT_LENGTH = 1;
+
+    const DEFAULT_PORT = 18182;
+    const PROTOCOL_VERSION_LENGTH_SIZE = 1;
+    const PROTOCOL_OPERATION_LENGTH_SIZE = 1;
+    const SIZE_BYTE_LENGTH = 1;
+    const DELETE_FILE_OPERATION = 7;
+    const CREATE_FILE_OPERATION = 8;
+    const DO_SYNC_OPERATION = 9;
+    const ERROR_REPORT = 1;
+    const OPERATION_END_REPORT = 2;
+    const REPORT_LENGTH = 1;
 
     class LivesyncTool {
         constructor() {
@@ -58,12 +59,12 @@ module.exports = (function () {
             return new Promise(function (resolve, reject) {
                 let error;
                 this._verifyActiveConnection(reject);
-                const fileNameData = this._getFileNameData(fileName, basePath),
-                    stats = fs.statSync(fileNameData.fileName),
-                    fileContentLengthBytes = stats.size,
-                    fileContentLengthString = fileContentLengthBytes.toString(),
-                    fileContentLengthSize = Buffer.byteLength(fileContentLengthString),
-                    headerBuffer = Buffer.alloc(PROTOCOL_OPERATION_LENGTH_SIZE +
+                const fileNameData = this._getFileNameData(fileName, basePath);
+                const stats = fs.statSync(fileNameData.fileName);
+                const fileContentLengthBytes = stats.size;
+                const fileContentLengthString = fileContentLengthBytes.toString();
+                const fileContentLengthSize = Buffer.byteLength(fileContentLengthString);
+                const headerBuffer = Buffer.alloc(PROTOCOL_OPERATION_LENGTH_SIZE +
                         SIZE_BYTE_LENGTH +
                         fileNameData.fileNameLengthSize +
                         fileNameData.fileNameLengthBytes +
@@ -98,8 +99,8 @@ module.exports = (function () {
         _sendFileContent(fileName) {
             return new Promise(function (resolve, reject) {
                 this._verifyActiveConnection(reject);
-                const fileStream = fs.createReadStream(fileName),
-                    fileHash = crypto.createHash("md5");
+                const fileStream = fs.createReadStream(fileName);
+                const fileHash = crypto.createHash("md5");
 
                 fileStream.on("data", function (chunk) {
                     fileHash.update(chunk);
@@ -129,8 +130,8 @@ module.exports = (function () {
         deleteFile(fileName, basePath) {
             return new Promise(function (resolve, reject) {
                 this._verifyActiveConnection(reject);
-                const fileNameData = this._getFileNameData(fileName, basePath),
-                    headerBuffer = Buffer.alloc(PROTOCOL_OPERATION_LENGTH_SIZE +
+                const fileNameData = this._getFileNameData(fileName, basePath);
+                const headerBuffer = Buffer.alloc(PROTOCOL_OPERATION_LENGTH_SIZE +
                         fileNameData.fileNameLengthSizeSize +
                         fileNameData.fileNameLengthSize +
                         fileNameData.fileNameLengthBytes);
@@ -190,8 +191,8 @@ module.exports = (function () {
         }
 
         sendDoSyncOperation(operationId, timeout) {
-            const id = operationId || this.generateOperationUid(),
-                operationPromise = new Promise(function (resolve, reject) {
+            const id = operationId || this.generateOperationUid();
+            const operationPromise = new Promise(function (resolve, reject) {
                     this._verifyActiveConnection(reject);
 
                     const message = `${DO_SYNC_OPERATION}${id}`,
@@ -242,8 +243,8 @@ module.exports = (function () {
 
         _checkConnectionStatus() {
             if (this.socketConnection === null) {
-                const defaultError = this._getErrorWithMessage("No socket connection available."),
-                    error = this.socketError || defaultError;
+                const defaultError = this._getErrorWithMessage("No socket connection available.");
+                const error = this.socketError || defaultError;
 
                 return error;
             }
@@ -261,9 +262,9 @@ module.exports = (function () {
                 socket.uid = crypto.randomBytes(16).toString("hex");
                 this.socketConnection = socket;
                 this.socketConnection.uid = crypto.randomBytes(16).toString("hex");
-                const versionLength = data.readUInt8(),
-                    versionBuffer = data.slice(PROTOCOL_VERSION_LENGTH_SIZE, versionLength + PROTOCOL_VERSION_LENGTH_SIZE),
-                    applicationIdentifierBuffer = data.slice(versionLength + PROTOCOL_VERSION_LENGTH_SIZE, data.length);
+                const versionLength = data.readUInt8();
+                const versionBuffer = data.slice(PROTOCOL_VERSION_LENGTH_SIZE, versionLength + PROTOCOL_VERSION_LENGTH_SIZE);
+                const applicationIdentifierBuffer = data.slice(versionLength + PROTOCOL_VERSION_LENGTH_SIZE, data.length);
 
                 this.protocolVersion = versionBuffer.toString();
                 this.applicationIdentifier = applicationIdentifierBuffer.toString();
@@ -329,8 +330,8 @@ module.exports = (function () {
         }
 
         _handleData(socketId, data) {
-            const reportType = data.readUInt8(),
-                infoBuffer = data.slice(REPORT_LENGTH, data.length);
+            const reportType = data.readUInt8();
+            const infoBuffer = data.slice(REPORT_LENGTH, data.length);
 
             if (reportType === ERROR_REPORT) {
                 const errorMessage = infoBuffer.toString();
@@ -341,8 +342,8 @@ module.exports = (function () {
         }
 
         _handleSyncEnd(data) {
-            const operationUid = data.toString(),
-                promiseHandler = this.operationPromises.get(operationUid);
+            const operationUid = data.toString();
+            const promiseHandler = this.operationPromises.get(operationUid);
 
             if (promiseHandler) {
                 promiseHandler.resolve(operationUid);
@@ -399,10 +400,10 @@ module.exports = (function () {
         }
 
         _getFileNameData(fileName, basePath) {
-            const relativeFileName = this._resolveRelativeName(fileName, basePath),
-                fileNameLengthBytes = Buffer.byteLength(relativeFileName),
-                fileNameLengthString = fileNameLengthBytes.toString(),
-                fileNameLengthSize = Buffer.byteLength(fileNameLengthString);
+            const relativeFileName = this._resolveRelativeName(fileName, basePath);
+            const fileNameLengthBytes = Buffer.byteLength(relativeFileName);
+            const fileNameLengthString = fileNameLengthBytes.toString();
+            const fileNameLengthSize = Buffer.byteLength(fileNameLengthString);
 
             return {
                 relativeFileName,
