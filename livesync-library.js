@@ -14,7 +14,8 @@ module.exports = (function () {
         CREATE_FILE_OPERATION = 8,
         DO_SYNC_OPERATION = 9,
         ERROR_REPORT = 1,
-        OPERATION_END_REPORT = 2;
+        OPERATION_END_REPORT = 2,
+        REPORT_LENGTH = 1;
 
     class LivesyncTool {
         constructor() {
@@ -329,7 +330,7 @@ module.exports = (function () {
 
         _handleData(socketId, data) {
             const reportType = data.readUInt8(),
-                infoBuffer = data.slice(Buffer.byteLength(reportType), data.length);
+                infoBuffer = data.slice(REPORT_LENGTH, data.length);
 
             if (reportType === ERROR_REPORT) {
                 const errorMessage = infoBuffer.toString();
